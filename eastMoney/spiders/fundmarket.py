@@ -1,67 +1,101 @@
 # -*- coding: utf-8 -*-
 import scrapy
-from ..items import EastmoneyItem
-
-
-# from scrapy.linkextractors import LinkExtractor
-# from scrapy.spiders import CrawlSpider, Rule
+import json
+from eastMoney.items import FundinfoItem, StockItem
 
 
 class FundmarketSpider(scrapy.Spider):
-    name = 'fundmarket'
-    allowed_domains = ['1234567.com.cn']
+    name = 'fundrank'
+    allowed_domains = ['fund.eastmoney.com']
 
-    start_urls = ['c#os_0;isall_1;ft_;pt_1']
+    offset = 1
+    url = 'http://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&gs=0&sc=zzf&st=desc&sd=2017-05-30&ed=2018-05-30&pn=50&dx=0&pi='
+
+    start_urls = [url + str(offset)]
 
     def parse(self, response):
-        items = []
-        # 获取每页的所有基金信息
-        funds = response.xpath("//div[@id='tableDiv']/table[@align='center']/tbody/tr")
-        # 遍历 取出基金代码和基金名称，然后继续往下请求详细信息页面
-        for each in funds:
-            item = EastmoneyItem()
-            item["fundcode"] = each.xpath("./td[@class='bg bzdm']/text()")[0].extract()
-            item["fundname"] = each.xpath("./td[@class='tol']/nobr/a/@title")[0].extract()
-            item["fundinfourl"] = "http://www.1234567.com.cn/" + each.xpath("./td[@class='tol']/nobr/a[1]/@href")[
-                0].extract()
+        # bytys转为str
+        data = response.body.decode("utf-8")
+        # 截取基金列表信息
+        data = data[data.find('['):data.find(']') + 1]
+        fundslist = json.loads(data)
 
-            items.append(item)
+        fundcode_lists = []
+        for fund in fundslist:
+            # 至此，得到了一个基金信息，都是list类型
+            fundinfo = fund.split(',')
+            item = FundinfoItem()
 
-        for item in items:
-            yield scrapy.Request(url=item["fundinfourl"], callback=self.parse_stock, meta={"meta_1": item})
+            # 基金代码
+            item["fund_code"] = fundinfo[0]
+            # 基金名称
+            item["fund_name"] = fundinfo[1]
+            # 基金详情页链接
+            item["fundinfo_url"] = "http://fund.eastmoney.com/" + str(fundinfo[0]) + ".html"
+            # 行情日期
+            item["fundmarket_date"] = fundinfo[3]
+            # 基金的单位净值
+            item["fund_nav"] = fundinfo[4]
+            # 基金的累计净值
+            item["fund_cav"] = fundinfo[5]
+            # 基金净值涨跌幅-日
+            item["fundnavrate_1day"] = fundinfo[6]
+            # 基金净值涨跌幅-周
+            item["fundnavrate_1week"] = fundinfo[7]
+            # 基金净值涨跌幅-1月
+            item["fundnavrate_1month"] = fundinfo[8]
+            # 基金净值涨跌幅-3月
+            item["fundnavrate_3month"] = fundinfo[9]
+            # 基金净值涨跌幅-6月
+            item["fundnavrate_6month"] = fundinfo[10]
+            # 基金的手续费
+            item["fund_cost"] = fundinfo[-5]
+
+            # yield item
+
+            fundcode_lists.append(fundinfo[0])
+
+        # 生成基金前十大持仓信息请求
+        for fundcode in fundcode_lists:
+            url = "http://fund.eastmoney.com/f10/FundArchivesDatas.aspx?type=jjcc&topline=10&year=2017&code=" + str(
+                fundcode)
+            yield scrapy.Request(url, callback=self.parse_stock, meta={"fundcode": fundcode})
 
     def parse_stock(self, response):
-        # 保存上面保存的基金代码和基金名称信息
-        meta_1 = response.meta["meta_1"]
+        fundcode = response.meta["fundcode"]
 
-        stockinfo_list = response.xpath(
-            "//div[@class='wrapper'][10]//div[contains(@class,'fund_item quotationItem_DataTable')]/div[@class='bd']/ul/li[@class='position_shares']//tr")
-        # 如果该基金没有持仓股票信息，空的会有2个空行，那就不遍历取了
-        print(len(stockinfo_list))
-        if len(stockinfo_list) > 2:
-            for each in stockinfo_list:
-                # 做一个标记：如果遍历到表头：股票名称	持仓占比	涨跌幅	相关资讯，暂无数据，2行 这样的数据就过滤掉 不遍历
-                if_table_th=each.xpath("./th")
-                if len(if_table_th) == 0 :
-                    item = EastmoneyItem()
+        # 获取持仓截止日期
+        dates = response.xpath("//label/font/text()").extract()
+        # 按每个季度分开遍历
+        # print("季度数量为" + str(len(dates)))
+        for i in range(1, len(dates) + 1):
+            # 得到其中一个季度的根节点
+            # print("i为-----------" + str(i))
+            node = response.xpath("//div[@class='box'][" + str(i) + "]")
 
-                    # 保存上一请求得到的基金代码、名称、链接新
-                    item["fundcode"] = meta_1["fundcode"]
-                    item["fundname"] = meta_1["fundname"]
-                    item["fundinfourl"] = meta_1["fundinfourl"]
+            fundnum = node.xpath(".//tbody/tr").extract()
+            # print("每季度的基金数量" + str(len(fundnum)))
+            for j in range(1, len(fundnum) + 1):
+                item = StockItem()
 
-                    # 基金前10大持仓股票名称
-                    item["stockname_in_fund"] = each.xpath("./td[1]/a/@title")[0].extract()
-                    # 持仓占比
-                    item["stockaccounted_in_fund"] = each.xpath("./td[2]/text()")[0].extract()
-                    # 涨跌幅
-                    item["stockrange_in_fund"] = each.xpath("./td[3]/span/text()")[0].extract()
+                # print("j为------------" + str(j))
+                # 一个季度的前10个股票信息
+                tr = node.xpath(".//tbody/tr[" + str(j) + "]")
 
-                    # 前十大持仓占比
-                    # item["sumstocketaccounted_in_fund"] = each.xpath("./td/a/@title").extract()
-                    # 持仓截止日期
-                    # item["lastdate"] = each.xpath("./td/a/@title").extract()
+                # 股票代码
+                item["stock_code"] = tr.xpath("./td[2]/a/text() | ./td[2]/span/text()")[0].extract()
+                # 股票名称
+                item["stock_name"] = tr.xpath("./td[3]/a/text()")[0].extract()
+                # 该股票净值占比
+                item["accounted_of_nav"] = tr.xpath("./td[5][1]/text()")[0].extract()
+                # 持股数（单位：万股
+                item["holding_num"] = tr.xpath("./td[6]/text()")[0].extract()
+                # 持仓市值（单位：万元）
+                item["worth_sum"] = tr.xpath("./td[7]/text()")[0].extract()
+                # 持仓截止日期
+                item["lastdate"] = dates[i - 1]
 
-                    yield item
+                # 基金代码
+                item["fundcode"] = fundcode
 
-    # def get_stockname_in_fund(self, response):  #     pass  #  # def get_stockaccounted_in_fund(self, response):  #     pass  #  # def get_stockrange_in_fund(self, response):  #     pass  #  # def get_sumstocketaccounted_in_fund(self, response):  #     pass  #  # def get_lastdate(self, response):  #     pass
+                # yield item
