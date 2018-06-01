@@ -2,14 +2,21 @@
 import scrapy
 import json
 from eastMoney.items import FundinfoItem, StockItem
+from scrapy.utils.project import get_project_settings
 
 
 class FundmarketSpider(scrapy.Spider):
     name = 'fundrank'
     allowed_domains = ['fund.eastmoney.com']
 
+    # settings = get_project_settings()
+    #
+    # FUND_STOCK_LASE_YERA = settings.get("FUND_STOCK_LASE_YERA")
+    # FUND_TRADE_STATUS = settings.get("FUND_TRADE_STATUS")
+
+
     offset = 1
-    url = 'http://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&gs=0&sc=zzf&st=desc&sd=2017-05-30&ed=2018-05-30&pn=50&dx=0&pi='
+    url = "http://fund.eastmoney.com/data/rankhandler.aspx?op=ph&dt=kf&ft=all&gs=0&sc=zzf&st=desc&sd=2017-05-30&ed=2018-05-30&pn=50&dx=0&pi="
 
     start_urls = [url + str(offset)]
 
@@ -51,17 +58,23 @@ class FundmarketSpider(scrapy.Spider):
             # 基金的手续费
             item["fund_cost"] = fundinfo[-5]
 
-            # yield item
+            yield item
 
             fundcode_lists.append(fundinfo[0])
 
+        if self.offset <= 50:
+            self.offset += 1
+            yield scrapy.Request(url=self.url + str(self.offset), callback=self.parse)
+
         # 生成基金前十大持仓信息请求
         for fundcode in fundcode_lists:
-            url = "http://fund.eastmoney.com/f10/FundArchivesDatas.aspx?type=jjcc&topline=10&year=2017&code=" + str(
+            url = "http://fund.eastmoney.com/f10/FundArchivesDatas.aspx?type=jjcc&topline=10&year=2018&code=" + str(
                 fundcode)
             yield scrapy.Request(url, callback=self.parse_stock, meta={"fundcode": fundcode})
 
     def parse_stock(self, response):
+
+        # 为了与基金代码关联
         fundcode = response.meta["fundcode"]
 
         # 获取持仓截止日期
@@ -83,19 +96,20 @@ class FundmarketSpider(scrapy.Spider):
                 tr = node.xpath(".//tbody/tr[" + str(j) + "]")
 
                 # 股票代码
-                item["stock_code"] = tr.xpath("./td[2]/a/text() | ./td[2]/span/text()")[0].extract()
+                item["stock_code"] = tr.xpath("./td[2]/a/text() | ./td[2]/span/text()").extract_first(
+                    default="not-found")
                 # 股票名称
-                item["stock_name"] = tr.xpath("./td[3]/a/text()")[0].extract()
+                item["stock_name"] = tr.xpath("./td[3]/a/text()").extract_first(default="not-found")
+
                 # 该股票净值占比
-                item["accounted_of_nav"] = tr.xpath("./td[5][1]/text()")[0].extract()
+                item["accounted_of_nav"] = tr.xpath("./td[last()-2]/text()").extract_first(default="not-found")
                 # 持股数（单位：万股
-                item["holding_num"] = tr.xpath("./td[6]/text()")[0].extract()
+                item["holding_num"] = tr.xpath("./td[last()-1]/text()").extract_first(default="not-found")
                 # 持仓市值（单位：万元）
-                item["worth_sum"] = tr.xpath("./td[7]/text()")[0].extract()
+                item["worth_sum"] = tr.xpath("./td[last()]/text()").extract_first(default="not-found")
                 # 持仓截止日期
                 item["lastdate"] = dates[i - 1]
-
                 # 基金代码
                 item["fundcode"] = fundcode
 
-                # yield item
+                yield item

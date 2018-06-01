@@ -16,6 +16,11 @@ NEWSPIDER_MODULE = 'eastMoney.spiders'
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko'
+# 自定义配置
+# 股票持仓信息的抓取年度
+FUND_STOCK_LASE_YERA = "2018"
+# 基金的可交易状态，0为全部，1为目前基金可购买
+FUND_TRADE_STATUS="0"
 
 # Obey robots.txt rules
 # ROBOTSTXT_OBEY = True
@@ -63,8 +68,7 @@ DOWNLOAD_DELAY = 1.5
 
 # Configure item pipelines
 # See https://doc.scrapy.org/en/latest/topics/item-pipeline.html
-ITEM_PIPELINES = {
-    'eastMoney.pipelines.EastmoneyPipeline': 300,
+ITEM_PIPELINES = {'eastMoney.pipelines.EastmoneyPipeline': 300,
 
 }
 
